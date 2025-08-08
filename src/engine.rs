@@ -1,8 +1,9 @@
 use anyhow::Result;
 use deno_core::{extension, op2};
+use deno_error::JsErrorBox;
 use std::{
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use tokio::time::timeout;
@@ -33,13 +34,102 @@ impl deno_core::ModuleLoader for TsModuleLoader {
     }
 }
 
-extension!(v6, ops = [op_set_timeout,],
+extension!(v6, ops = [op_set_timeout, op_fetch],
     esm_entry_point = "ext:v6/runtime.js",
     esm = [dir "src", "runtime.js"],);
 
-#[op2(async)]
+#[op2(async, stack_trace)]
 async fn op_set_timeout(delay: f64) {
     tokio::time::sleep(std::time::Duration::from_millis(delay as u64)).await;
+}
+
+// Global HTTP client for reuse
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+#[op2(async, stack_trace)]
+#[serde]
+async fn op_fetch(
+    #[string] url: String,
+    #[serde] options: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsErrorBox> {
+    let client = HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .pool_max_idle_per_host(100)
+            .pool_idle_timeout(std::time::Duration::from_secs(30))
+            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent("V6/0.1.0")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .local_address(None)
+            .build()
+            .unwrap()
+    });
+    let mut request = client.get(&url);
+
+    // Parse options if provided
+    if let Some(opts) = options {
+        // Set HTTP method
+        if let Some(method) = opts.get("method").and_then(|v| v.as_str()) {
+            request = match method.to_uppercase().as_str() {
+                "GET" => client.get(&url),
+                "POST" => client.post(&url),
+                "PUT" => client.put(&url),
+                "DELETE" => client.delete(&url),
+                "PATCH" => client.patch(&url),
+                "HEAD" => client.head(&url),
+                _ => panic!("Unsupported HTTP method: {}", method),
+            };
+        }
+
+        // Set headers
+        if let Some(headers) = opts.get("headers").and_then(|v| v.as_object()) {
+            for (key, value) in headers {
+                if let Some(value_str) = value.as_str() {
+                    request = request.header(key, value_str);
+                }
+            }
+        }
+
+        // Set body
+        if let Some(body) = opts.get("body").and_then(|v| v.as_str()) {
+            request = request.body(body.to_string());
+        }
+    }
+
+    let response_result = request.send().await;
+    // let _request_duration = request_start.elapsed().as_nanos() as f64;
+
+    match response_result {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            let is_success = (200..300).contains(&status);
+
+            // Don't record stats here - let runtime.js handle it to avoid double recording
+
+            let headers: std::collections::HashMap<String, String> = response
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+
+            let text = response
+                .text()
+                .await
+                .map_err(|e| JsErrorBox::type_error(e.to_string()))?;
+
+            Ok(serde_json::json!({
+              "status": status,
+              "ok": is_success,
+              "statusText": reqwest::StatusCode::from_u16(status).unwrap().canonical_reason().unwrap_or(""),
+              "headers": headers,
+              "body": text
+            }))
+        }
+        Err(e) => {
+            // Don't record stats here - let runtime.js handle it to avoid double recording
+            Err(JsErrorBox::type_error(e.to_string()))
+        }
+    }
 }
 
 pub fn extract_iterations(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f64> {
@@ -68,8 +158,7 @@ pub fn extract_duration(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<
     let duration_script =
         deno_core::v8::String::new(&mut scope, "globalThis.currentConfig.duration").unwrap();
 
-    let compiled_code =
-        deno_core::v8::Script::compile(&mut scope, duration_script, None).unwrap();
+    let compiled_code = deno_core::v8::Script::compile(&mut scope, duration_script, None).unwrap();
 
     if let Some(result) = compiled_code.run(&mut scope) {
         if let Some(number) = result.number_value(&mut scope) {
@@ -87,8 +176,7 @@ pub fn extract_timeout(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f
     let timeout_script =
         deno_core::v8::String::new(&mut scope, "globalThis.currentConfig.timeout").unwrap();
 
-    let compiled_code =
-        deno_core::v8::Script::compile(&mut scope, timeout_script, None).unwrap();
+    let compiled_code = deno_core::v8::Script::compile(&mut scope, timeout_script, None).unwrap();
 
     if let Some(result) = compiled_code.run(&mut scope) {
         if let Some(number) = result.number_value(&mut scope) {
@@ -137,8 +225,7 @@ pub fn extract_iteration_function(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) 
         deno_core::v8::String::new(&mut scope, "globalThis.currentConfig.iteration.toString()")
             .unwrap();
 
-    let compiled_code =
-        deno_core::v8::Script::compile(&mut scope, iteration_script, None).unwrap();
+    let compiled_code = deno_core::v8::Script::compile(&mut scope, iteration_script, None).unwrap();
 
     if let Some(result) = compiled_code.run(&mut scope) {
         if let Some(string_val) = result.to_string(&mut scope) {
@@ -189,7 +276,7 @@ pub fn setup_runtime_config(
     let v8_string = deno_core::v8::String::new(&mut scope, &setup_script).unwrap();
     let compiled_code = deno_core::v8::Script::compile(&mut scope, v8_string, None).unwrap();
     compiled_code.run(&mut scope);
-    
+
     Ok(())
 }
 
@@ -237,7 +324,7 @@ pub async fn run_iteration(
                 std::task::Poll::Ready(Err(e)) => {
                     println!("Task {} (VU {}) failed: {:?}", i, vu_id, e);
                     break; // Break on error
-                },
+                }
                 std::task::Poll::Pending => {
                     // Wait a small amount for async operations to progress
                     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -249,7 +336,10 @@ pub async fn run_iteration(
 
     match timeout(iteration_timeout, iteration_future).await {
         Ok(_) => {}
-        Err(_) => println!("Task {} (VU {}) timed out after {:?}", i, vu_id, iteration_timeout),
+        Err(_) => println!(
+            "Task {} (VU {}) timed out after {:?}",
+            i, vu_id, iteration_timeout
+        ),
     }
 }
 
@@ -259,9 +349,19 @@ pub fn create_shared_runtime(
     timeout: f64,
     vus: usize,
     iteration_fn: &str,
-) -> Result<(Arc<Mutex<deno_core::JsRuntime>>, Arc<deno_core::v8::Global<deno_core::v8::Script>>)> {
+) -> Result<(
+    Arc<Mutex<deno_core::JsRuntime>>,
+    Arc<deno_core::v8::Global<deno_core::v8::Script>>,
+)> {
     let runtime = create_fresh_runtime()?;
-    setup_runtime_config(runtime.clone(), iterations, duration, timeout, vus, iteration_fn)?;
+    setup_runtime_config(
+        runtime.clone(),
+        iterations,
+        duration,
+        timeout,
+        vus,
+        iteration_fn,
+    )?;
 
     // Pre-compile the script for maximum performance
     let compiled_script = {
