@@ -1,0 +1,20 @@
+[package]
+name = "v6"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+deno_ast = { version = "0.44.0", features = ["transpiling"] }
+deno_core = "0.338.0"
+deno_error = "0.5.6"
+reqwest = "0.12"
+tokio = { version = "1.43", features = ["full", "macros"] }
+hdrhistogram = "7.5.4"
+anyhow = "1.0.98"
+futures = "0.3"
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[build-dependencies]
+deno_core = "0.338.0"
