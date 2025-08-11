@@ -46,89 +46,98 @@ async fn op_set_timeout(delay: f64) {
 // Global HTTP client for reuse
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
+// Create optimized HTTP client for localhost testing with reasonable timeouts
+fn create_optimized_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(100)
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .tcp_keepalive(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(10))  // Reasonable timeout for localhost
+        .user_agent("V6-LoadTest/1.0")
+        .connect_timeout(std::time::Duration::from_secs(5))  // Reasonable connect timeout
+        .tcp_nodelay(true)
+        .http2_keep_alive_interval(Some(std::time::Duration::from_secs(30)))
+        .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true)
+        .local_address(None)
+        .build()
+        .expect("Failed to create HTTP client")
+}
+
 #[op2(async, stack_trace)]
 #[serde]
 async fn op_fetch(
     #[string] url: String,
     #[serde] options: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, JsErrorBox> {
-    let client = HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .pool_max_idle_per_host(100)
-            .pool_idle_timeout(std::time::Duration::from_secs(30))
-            .tcp_keepalive(std::time::Duration::from_secs(60))
-            .timeout(std::time::Duration::from_secs(30))
-            .user_agent("V6/0.1.0")
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .local_address(None)
-            .build()
-            .unwrap()
-    });
-    let mut request = client.get(&url);
+    // Use tokio::spawn to run the fetch operation in parallel
+    let fetch_task = tokio::spawn(async move {
+        let client = HTTP_CLIENT.get_or_init(create_optimized_client);
+        let mut request = client.get(&url);
 
-    // Parse options if provided
-    if let Some(opts) = options {
-        // Set HTTP method
-        if let Some(method) = opts.get("method").and_then(|v| v.as_str()) {
-            request = match method.to_uppercase().as_str() {
-                "GET" => client.get(&url),
-                "POST" => client.post(&url),
-                "PUT" => client.put(&url),
-                "DELETE" => client.delete(&url),
-                "PATCH" => client.patch(&url),
-                "HEAD" => client.head(&url),
-                _ => panic!("Unsupported HTTP method: {}", method),
-            };
-        }
+        // Parse options if provided
+        if let Some(opts) = options {
+            // Set HTTP method
+            if let Some(method) = opts.get("method").and_then(|v| v.as_str()) {
+                request = match method.to_uppercase().as_str() {
+                    "GET" => client.get(&url),
+                    "POST" => client.post(&url),
+                    "PUT" => client.put(&url),
+                    "DELETE" => client.delete(&url),
+                    "PATCH" => client.patch(&url),
+                    "HEAD" => client.head(&url),
+                    _ => return Err(format!("Unsupported HTTP method: {}", method)),
+                };
+            }
 
-        // Set headers
-        if let Some(headers) = opts.get("headers").and_then(|v| v.as_object()) {
-            for (key, value) in headers {
-                if let Some(value_str) = value.as_str() {
-                    request = request.header(key, value_str);
+            // Set headers
+            if let Some(headers) = opts.get("headers").and_then(|v| v.as_object()) {
+                for (key, value) in headers {
+                    if let Some(value_str) = value.as_str() {
+                        request = request.header(key, value_str);
+                    }
                 }
+            }
+
+            // Set body
+            if let Some(body) = opts.get("body").and_then(|v| v.as_str()) {
+                request = request.body(body.to_string());
             }
         }
 
-        // Set body
-        if let Some(body) = opts.get("body").and_then(|v| v.as_str()) {
-            request = request.body(body.to_string());
+        let response_result = request.send().await;
+
+        match response_result {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                let is_success = (200..300).contains(&status);
+
+                let headers: std::collections::HashMap<String, String> = response
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                    .collect();
+
+                match response.text().await {
+                    Ok(text) => Ok(serde_json::json!({
+                        "status": status,
+                        "ok": is_success,
+                        "statusText": reqwest::StatusCode::from_u16(status).unwrap().canonical_reason().unwrap_or(""),
+                        "headers": headers,
+                        "body": text
+                    })),
+                    Err(e) => Err(format!("Failed to read response body: {}", e)),
+                }
+            }
+            Err(e) => Err(format!("Request failed: {}", e)),
         }
-    }
+    });
 
-    let response_result = request.send().await;
-    // let _request_duration = request_start.elapsed().as_nanos() as f64;
-
-    match response_result {
-        Ok(response) => {
-            let status = response.status().as_u16();
-            let is_success = (200..300).contains(&status);
-
-            // Don't record stats here - let runtime.js handle it to avoid double recording
-
-            let headers: std::collections::HashMap<String, String> = response
-                .headers()
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-                .collect();
-
-            let text = response
-                .text()
-                .await
-                .map_err(|e| JsErrorBox::type_error(e.to_string()))?;
-
-            Ok(serde_json::json!({
-              "status": status,
-              "ok": is_success,
-              "statusText": reqwest::StatusCode::from_u16(status).unwrap().canonical_reason().unwrap_or(""),
-              "headers": headers,
-              "body": text
-            }))
-        }
-        Err(e) => {
-            // Don't record stats here - let runtime.js handle it to avoid double recording
-            Err(JsErrorBox::type_error(e.to_string()))
-        }
+    // Await the spawned task
+    match fetch_task.await {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(error_msg)) => Err(JsErrorBox::type_error(error_msg)),
+        Err(join_error) => Err(JsErrorBox::type_error(format!("Task join error: {}", join_error))),
     }
 }
 
@@ -302,8 +311,8 @@ pub async fn run_iteration(
             let poll_result = {
                 let mut runtime = js_runtime.lock().unwrap();
 
-                // Force memory cleanup much less frequently for better performance
-                if i % 5000 == 0 {
+                // Minimal memory cleanup for maximum performance
+                if i % 100000 == 0 {
                     let mut scope = runtime.handle_scope();
                     scope.low_memory_notification();
                 }
@@ -326,8 +335,8 @@ pub async fn run_iteration(
                     break; // Break on error
                 }
                 std::task::Poll::Pending => {
-                    // Wait a small amount for async operations to progress
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    // Use tokio::task::yield_now() for better performance
+                    tokio::task::yield_now().await;
                     continue;
                 }
             }
@@ -406,8 +415,8 @@ pub async fn run_load_test(
         let _script_source = "globalThis.currentConfig.iteration();".to_string();
 
         let mut handles = Vec::new();
-        // Limit concurrent tasks to prevent memory exhaustion
-        let max_concurrent_tasks = (vus * 100).min(1000); // Limit to prevent memory issues
+        // Ultra-high concurrent tasks for maximum localhost throughput
+        let max_concurrent_tasks = (vus * 1000).min(10000); // Extreme limits for localhost testing
         let max_tasks = if is_infinite {
             max_concurrent_tasks
         } else {
@@ -453,16 +462,16 @@ pub async fn run_load_test(
                 // Clean up completed handles periodically
                 active_handles.retain(|handle| !handle.is_finished());
 
-                // Periodic memory cleanup for shared runtime - much less frequent
-                if task_counter % 10000 == 0 {
+                // Ultra-minimal memory cleanup for maximum throughput
+                if task_counter % 200000 == 0 {
                     if let Ok(mut runtime) = shared_runtime.try_lock() {
                         let mut scope = runtime.handle_scope();
                         scope.low_memory_notification();
                     }
                 }
 
-                // Small delay to prevent busy looping
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                // Use yield_now for better performance
+                tokio::task::yield_now().await;
             }
         } else {
             // For finite iterations, distribute tasks across VUs
