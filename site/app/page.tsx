@@ -6,8 +6,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Zap,
@@ -17,7 +15,6 @@ import {
   Star,
   ArrowRight,
   Github,
-  Twitter,
   Linkedin,
 } from "lucide-react";
 
@@ -32,7 +29,7 @@ export default function Home() {
               <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold text-lg">V6</span>
               </div>
-              <span className="text-black font-bold text-xl">V6</span>
+              {/*<span className="text-black font-bold text-xl">V6</span>*/}
             </div>
             <nav className="hidden md:flex space-x-8">
               <a
@@ -125,7 +122,7 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="text-gray-600">
-                  Built on Rust's performance and V8 JavaScript engine, V6
+                  Built on Rust&apos;s performance and V8 JavaScript engine, V6
                   delivers unparalleled speed and efficiency for your load
                   tests.
                 </CardDescription>
@@ -234,7 +231,7 @@ export default function Home() {
             <div className="text-gray-700 font-bold text-2xl">Starbucks</div>
             <div className="text-gray-700 font-bold text-2xl">Nike</div>
             <div className="text-gray-700 font-bold text-2xl">Target</div>
-            <div className="text-gray-700 font-bold text-2xl">McDonald's</div>
+            <div className="text-gray-700 font-bold text-2xl">McDonald&apos;s</div>
             <div className="text-gray-700 font-bold text-2xl">Walmart</div>
             <div className="text-gray-700 font-bold text-2xl">FedEx</div>
           </div>
@@ -268,9 +265,9 @@ export default function Home() {
                   ))}
                 </div>
                 <p className="text-gray-600 mb-4">
-                  "V6 completely transformed our load testing workflow. The
+                  &quot;V6 completely transformed our load testing workflow. The
                   performance improvements over our previous solution were
-                  immediately noticeable."
+                  immediately noticeable.&quot;
                 </p>
                 <div className="flex items-center">
                   <div className="w-10 h-10 bg-black rounded-full flex items-center justify-center text-white font-bold mr-3">
@@ -297,8 +294,8 @@ export default function Home() {
                   ))}
                 </div>
                 <p className="text-gray-600 mb-4">
-                  "The JavaScript/TypeScript support is fantastic. Our team was
-                  productive from day one without learning a new language."
+                  &quot;The JavaScript/TypeScript support is fantastic. Our team was
+                  productive from day one without learning a new language.&quot;
                 </p>
                 <div className="flex items-center">
                   <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center text-white font-bold mr-3">
@@ -325,8 +322,8 @@ export default function Home() {
                   ))}
                 </div>
                 <p className="text-gray-600 mb-4">
-                  "V6's extensibility allowed us to create custom plugins for
-                  our specific use case. The architecture is brilliant."
+                  &quot;V6&apos;s extensibility allowed us to create custom plugins for
+                  our specific use case. The architecture is brilliant.&quot;
                 </p>
                 <div className="flex items-center">
                   <div className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-white font-bold mr-3">
