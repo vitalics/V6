@@ -1,8 +1,9 @@
 use anyhow::Result;
 use deno_core::{extension, op2};
+use deno_error::JsErrorBox;
 use std::{
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use tokio::time::timeout;
@@ -33,13 +34,111 @@ impl deno_core::ModuleLoader for TsModuleLoader {
     }
 }
 
-extension!(v6, ops = [op_set_timeout,],
+extension!(v6, ops = [op_set_timeout, op_fetch],
     esm_entry_point = "ext:v6/runtime.js",
     esm = [dir "src", "runtime.js"],);
 
-#[op2(async)]
+#[op2(async, stack_trace)]
 async fn op_set_timeout(delay: f64) {
     tokio::time::sleep(std::time::Duration::from_millis(delay as u64)).await;
+}
+
+// Global HTTP client for reuse
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+// Create optimized HTTP client for localhost testing with reasonable timeouts
+fn create_optimized_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(100)
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .tcp_keepalive(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(10))  // Reasonable timeout for localhost
+        .user_agent("V6-LoadTest/1.0")
+        .connect_timeout(std::time::Duration::from_secs(5))  // Reasonable connect timeout
+        .tcp_nodelay(true)
+        .http2_keep_alive_interval(Some(std::time::Duration::from_secs(30)))
+        .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true)
+        .local_address(None)
+        .build()
+        .expect("Failed to create HTTP client")
+}
+
+#[op2(async, stack_trace)]
+#[serde]
+async fn op_fetch(
+    #[string] url: String,
+    #[serde] options: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsErrorBox> {
+    // Use tokio::spawn to run the fetch operation in parallel
+    let fetch_task = tokio::spawn(async move {
+        let client = HTTP_CLIENT.get_or_init(create_optimized_client);
+        let mut request = client.get(&url);
+
+        // Parse options if provided
+        if let Some(opts) = options {
+            // Set HTTP method
+            if let Some(method) = opts.get("method").and_then(|v| v.as_str()) {
+                request = match method.to_uppercase().as_str() {
+                    "GET" => client.get(&url),
+                    "POST" => client.post(&url),
+                    "PUT" => client.put(&url),
+                    "DELETE" => client.delete(&url),
+                    "PATCH" => client.patch(&url),
+                    "HEAD" => client.head(&url),
+                    _ => return Err(format!("Unsupported HTTP method: {}", method)),
+                };
+            }
+
+            // Set headers
+            if let Some(headers) = opts.get("headers").and_then(|v| v.as_object()) {
+                for (key, value) in headers {
+                    if let Some(value_str) = value.as_str() {
+                        request = request.header(key, value_str);
+                    }
+                }
+            }
+
+            // Set body
+            if let Some(body) = opts.get("body").and_then(|v| v.as_str()) {
+                request = request.body(body.to_string());
+            }
+        }
+
+        let response_result = request.send().await;
+
+        match response_result {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                let is_success = (200..300).contains(&status);
+
+                let headers: std::collections::HashMap<String, String> = response
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                    .collect();
+
+                match response.text().await {
+                    Ok(text) => Ok(serde_json::json!({
+                        "status": status,
+                        "ok": is_success,
+                        "statusText": reqwest::StatusCode::from_u16(status).unwrap().canonical_reason().unwrap_or(""),
+                        "headers": headers,
+                        "body": text
+                    })),
+                    Err(e) => Err(format!("Failed to read response body: {}", e)),
+                }
+            }
+            Err(e) => Err(format!("Request failed: {}", e)),
+        }
+    });
+
+    // Await the spawned task
+    match fetch_task.await {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(error_msg)) => Err(JsErrorBox::type_error(error_msg)),
+        Err(join_error) => Err(JsErrorBox::type_error(format!("Task join error: {}", join_error))),
+    }
 }
 
 pub fn extract_iterations(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f64> {
@@ -68,8 +167,7 @@ pub fn extract_duration(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<
     let duration_script =
         deno_core::v8::String::new(&mut scope, "globalThis.currentConfig.duration").unwrap();
 
-    let compiled_code =
-        deno_core::v8::Script::compile(&mut scope, duration_script, None).unwrap();
+    let compiled_code = deno_core::v8::Script::compile(&mut scope, duration_script, None).unwrap();
 
     if let Some(result) = compiled_code.run(&mut scope) {
         if let Some(number) = result.number_value(&mut scope) {
@@ -87,8 +185,7 @@ pub fn extract_timeout(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f
     let timeout_script =
         deno_core::v8::String::new(&mut scope, "globalThis.currentConfig.timeout").unwrap();
 
-    let compiled_code =
-        deno_core::v8::Script::compile(&mut scope, timeout_script, None).unwrap();
+    let compiled_code = deno_core::v8::Script::compile(&mut scope, timeout_script, None).unwrap();
 
     if let Some(result) = compiled_code.run(&mut scope) {
         if let Some(number) = result.number_value(&mut scope) {
@@ -137,8 +234,7 @@ pub fn extract_iteration_function(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) 
         deno_core::v8::String::new(&mut scope, "globalThis.currentConfig.iteration.toString()")
             .unwrap();
 
-    let compiled_code =
-        deno_core::v8::Script::compile(&mut scope, iteration_script, None).unwrap();
+    let compiled_code = deno_core::v8::Script::compile(&mut scope, iteration_script, None).unwrap();
 
     if let Some(result) = compiled_code.run(&mut scope) {
         if let Some(string_val) = result.to_string(&mut scope) {
@@ -189,7 +285,7 @@ pub fn setup_runtime_config(
     let v8_string = deno_core::v8::String::new(&mut scope, &setup_script).unwrap();
     let compiled_code = deno_core::v8::Script::compile(&mut scope, v8_string, None).unwrap();
     compiled_code.run(&mut scope);
-    
+
     Ok(())
 }
 
@@ -215,8 +311,8 @@ pub async fn run_iteration(
             let poll_result = {
                 let mut runtime = js_runtime.lock().unwrap();
 
-                // Force memory cleanup much less frequently for better performance
-                if i % 5000 == 0 {
+                // Minimal memory cleanup for maximum performance
+                if i % 100000 == 0 {
                     let mut scope = runtime.handle_scope();
                     scope.low_memory_notification();
                 }
@@ -237,10 +333,10 @@ pub async fn run_iteration(
                 std::task::Poll::Ready(Err(e)) => {
                     println!("Task {} (VU {}) failed: {:?}", i, vu_id, e);
                     break; // Break on error
-                },
+                }
                 std::task::Poll::Pending => {
-                    // Wait a small amount for async operations to progress
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    // Use tokio::task::yield_now() for better performance
+                    tokio::task::yield_now().await;
                     continue;
                 }
             }
@@ -249,7 +345,10 @@ pub async fn run_iteration(
 
     match timeout(iteration_timeout, iteration_future).await {
         Ok(_) => {}
-        Err(_) => println!("Task {} (VU {}) timed out after {:?}", i, vu_id, iteration_timeout),
+        Err(_) => println!(
+            "Task {} (VU {}) timed out after {:?}",
+            i, vu_id, iteration_timeout
+        ),
     }
 }
 
@@ -259,9 +358,19 @@ pub fn create_shared_runtime(
     timeout: f64,
     vus: usize,
     iteration_fn: &str,
-) -> Result<(Arc<Mutex<deno_core::JsRuntime>>, Arc<deno_core::v8::Global<deno_core::v8::Script>>)> {
+) -> Result<(
+    Arc<Mutex<deno_core::JsRuntime>>,
+    Arc<deno_core::v8::Global<deno_core::v8::Script>>,
+)> {
     let runtime = create_fresh_runtime()?;
-    setup_runtime_config(runtime.clone(), iterations, duration, timeout, vus, iteration_fn)?;
+    setup_runtime_config(
+        runtime.clone(),
+        iterations,
+        duration,
+        timeout,
+        vus,
+        iteration_fn,
+    )?;
 
     // Pre-compile the script for maximum performance
     let compiled_script = {
@@ -306,8 +415,8 @@ pub async fn run_load_test(
         let _script_source = "globalThis.currentConfig.iteration();".to_string();
 
         let mut handles = Vec::new();
-        // Limit concurrent tasks to prevent memory exhaustion
-        let max_concurrent_tasks = (vus * 100).min(1000); // Limit to prevent memory issues
+        // Ultra-high concurrent tasks for maximum localhost throughput
+        let max_concurrent_tasks = (vus * 1000).min(10000); // Extreme limits for localhost testing
         let max_tasks = if is_infinite {
             max_concurrent_tasks
         } else {
@@ -353,16 +462,16 @@ pub async fn run_load_test(
                 // Clean up completed handles periodically
                 active_handles.retain(|handle| !handle.is_finished());
 
-                // Periodic memory cleanup for shared runtime - much less frequent
-                if task_counter % 10000 == 0 {
+                // Ultra-minimal memory cleanup for maximum throughput
+                if task_counter % 200000 == 0 {
                     if let Ok(mut runtime) = shared_runtime.try_lock() {
                         let mut scope = runtime.handle_scope();
                         scope.low_memory_notification();
                     }
                 }
 
-                // Small delay to prevent busy looping
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                // Use yield_now for better performance
+                tokio::task::yield_now().await;
             }
         } else {
             // For finite iterations, distribute tasks across VUs

@@ -8,8 +8,8 @@ defineConfig({
   timeout: 10, // max timeout for each iteration
   vus: 1, // 2 Virtual Users
   iteration: async function () {
-    const now = Date.now();
-    await setTimeout(1000);
-    console.log("[JS] iteration duration:", Date.now() - now);
+    // await setTimeout(1000);
+    const res = await fetch("http://localhost:3001");
+    console.log("Response. status", res.status);
   },
 });
