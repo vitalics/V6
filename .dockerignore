@@ -1,0 +1,46 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Git
+.git/
+.gitignore
+
+# GitHub Actions
+.github/
+
+# Documentation
+README.md
+LICENSE
+
+# Test files
+test/
+
+# Site files (if not needed for runtime)
+site/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Other artifacts
+*.tar.gz
+*.zip
