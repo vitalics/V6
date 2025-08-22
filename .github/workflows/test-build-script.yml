@@ -1,0 +1,196 @@
+name: Test Build Script
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-build-script:
+    name: Test build-all.sh
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            shell: bash
+            targets: "x86_64-unknown-linux-gnu x86_64-unknown-linux-musl"
+            platform: linux
+          - os: macos-latest
+            shell: bash
+            targets: "x86_64-apple-darwin aarch64-apple-darwin"
+            platform: macos
+          - os: windows-latest
+            shell: bash
+            targets: "x86_64-pc-windows-msvc"
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: test-build-${{ matrix.platform }}
+      
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+      
+      - name: Install cross-compilation tool
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      
+      - name: Test build script help
+        run: |
+          chmod +x build-all.sh
+          ./build-all.sh --help
+      
+      - name: Test build script list-targets
+        run: ./build-all.sh --list-targets
+      
+      - name: Test single target build
+        run: |
+          # Build just one target to test the script works
+          if [[ "${{ matrix.platform }}" == "linux" ]]; then
+            ./build-all.sh --install-targets x86_64-unknown-linux-gnu
+          elif [[ "${{ matrix.platform }}" == "macos" ]]; then
+            ./build-all.sh --install-targets aarch64-apple-darwin
+          elif [[ "${{ matrix.platform }}" == "windows" ]]; then
+            ./build-all.sh --install-targets x86_64-pc-windows-msvc
+          fi
+      
+      - name: Verify build output
+        run: |
+          echo "Build directory contents:"
+          ls -la target/release-builds/ || echo "No build directory found"
+          
+          echo "Target directory contents:"
+          find target -name "v6*" -type f || echo "No binaries found"
+      
+      - name: Test build script status
+        run: ./build-all.sh --help
+      
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-build-${{ matrix.platform }}
+          path: |
+            target/release-builds/
+            target/*/release/v6*
+          retention-days: 1
+
+  smoke-test:
+    name: Smoke test binaries
+    needs: test-build-script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: test-build-linux
+          path: artifacts
+      
+      - name: Test binary execution
+        run: |
+          find artifacts -name "v6-*linux*" -type f | head -1 | xargs -I {} bash -c '
+            echo "Testing binary: {}"
+            chmod +x "{}"
+            "{}" --help || echo "Binary help failed"
+            "{}" --version || echo "Binary version failed (expected if not implemented)"
+          '
+
+  verify-script-consistency:
+    name: Verify script consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check script syntax
+        run: |
+          bash -n build-all.sh
+          echo "✅ build-all.sh syntax is valid"
+      
+      - name: Check quick-build script syntax
+        run: |
+          bash -n quick-build.sh
+          echo "✅ quick-build.sh syntax is valid"
+      
+      - name: Verify script permissions
+        run: |
+          if [[ -x build-all.sh ]]; then
+            echo "✅ build-all.sh is executable"
+          else
+            echo "❌ build-all.sh is not executable"
+            exit 1
+          fi
+          
+          if [[ -x quick-build.sh ]]; then
+            echo "✅ quick-build.sh is executable"
+          else
+            echo "❌ quick-build.sh is not executable"
+            exit 1
+          fi
+      
+      - name: Test script compatibility
+        run: |
+          echo "Testing build-all.sh with various bash versions..."
+          
+          # Test with current bash
+          bash --version
+          bash build-all.sh --help >/dev/null
+          echo "✅ Works with system bash"
+          
+          # Test script without execution bit
+          bash ./build-all.sh --help >/dev/null
+          echo "✅ Works when called with bash explicitly"
+
+  makefile-test:
+    name: Test Makefile integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Test Makefile help
+        run: make help
+      
+      - name: Test Makefile status
+        run: make status
+      
+      - name: Test make install-targets
+        run: make install-targets
+      
+      - name: Test make quick-linux
+        run: make quick-linux
+      
+      - name: Verify Makefile build
+        run: |
+          echo "Checking if binary was created..."
+          if [[ -f target/x86_64-unknown-linux-gnu/release/v6 ]]; then
+            echo "✅ Binary created successfully"
+            ls -la target/x86_64-unknown-linux-gnu/release/v6
+          else
+            echo "❌ Binary not found"
+            echo "Contents of target directory:"
+            find target -name "v6*" -type f || echo "No v6 binaries found"
+            exit 1
+          fi

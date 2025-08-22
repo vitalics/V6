@@ -49,145 +49,94 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            name: v6-linux-x86_64
-            cross: false
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            name: v6-linux-x86_64-musl
-            cross: false
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            name: v6-linux-aarch64
-            cross: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            name: v6-macos-x86_64
-            cross: false
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            name: v6-macos-aarch64
-            cross: false
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            name: v6-windows-x86_64.exe
-            cross: false
+          - os: ubuntu-latest
+            targets: "x86_64-unknown-linux-gnu x86_64-unknown-linux-musl aarch64-unknown-linux-gnu"
+            platform: linux
+          - os: macos-latest
+            targets: "x86_64-apple-darwin aarch64-apple-darwin"
+            platform: macos
+          - os: windows-latest
+            targets: "x86_64-pc-windows-msvc"
+            platform: windows
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      
-      - name: Install cross
-        if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
       
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.platform }}
       
-      - name: Install musl tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - name: Install cross-compilation tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+          cargo install cross --git https://github.com/cross-rs/cross
       
-      - name: Build binary
+      - name: Install cross-compilation tools (macOS)
+        if: matrix.os == 'macos-latest'
         run: |
-          if [[ "${{ matrix.cross }}" == "true" ]]; then
-            cross build --release --target ${{ matrix.target }}
+          # Install newer bash if needed for build script
+          if [[ ${BASH_VERSION%%.*} -lt 4 ]]; then
+            brew install bash
+          fi
+      
+      - name: Install cross-compilation tools (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+      
+      - name: Make build script executable
+        if: matrix.os != 'windows-latest'
+        run: chmod +x build-all.sh
+      
+      - name: Install targets and build with archives
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            bash build-all.sh --install-targets --clean ${{ matrix.targets }}
           else
-            cargo build --release --target ${{ matrix.target }}
+            ./build-all.sh --install-targets --clean ${{ matrix.targets }}
           fi
       
-      - name: Strip binary (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          if command -v strip &> /dev/null; then
-            strip target/${{ matrix.target }}/release/v6
-          fi
-      
-      - name: Prepare binary (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          cp target/${{ matrix.target }}/release/v6 ${{ matrix.name }}
-          chmod +x ${{ matrix.name }}
-      
-      - name: Prepare binary (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          copy target\${{ matrix.target }}\release\v6.exe ${{ matrix.name }}
-      
-      - name: Create archive (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          tar -czf ${{ matrix.name }}.tar.gz ${{ matrix.name }}
-          sha256sum ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
-      
-      - name: Create archive (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          7z a ${{ matrix.name }}.zip ${{ matrix.name }}
-          certutil -hashfile ${{ matrix.name }}.zip SHA256 > ${{ matrix.name }}.zip.sha256
-      
-      - name: Upload archive (Unix)
-        if: matrix.os != 'windows-latest'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload artifacts for release
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ matrix.name }}.tar.gz
-          asset_name: ${{ matrix.name }}.tar.gz
-          asset_content_type: application/gzip
-      
-      - name: Upload checksum (Unix)
-        if: matrix.os != 'windows-latest'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ matrix.name }}.tar.gz.sha256
-          asset_name: ${{ matrix.name }}.tar.gz.sha256
-          asset_content_type: text/plain
-      
-      - name: Upload archive (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ matrix.name }}.zip
-          asset_name: ${{ matrix.name }}.zip
-          asset_content_type: application/zip
-      
-      - name: Upload checksum (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ${{ matrix.name }}.zip.sha256
-          asset_name: ${{ matrix.name }}.zip.sha256
-          asset_content_type: text/plain
+          name: release-artifacts-${{ matrix.platform }}
+          path: target/release-builds/
+          retention-days: 1
 
   finalize-release:
     name: Finalize Release
     needs: [create-release, build-release]
     runs-on: ubuntu-latest
     steps:
-      - name: Mark release as published
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Organize and upload release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "v6-*" -type f | while read file; do
+            cp "$file" release-assets/
+          done
+          
+          # List what we have
+          echo "Release assets:"
+          ls -la release-assets/
+      
+      - name: Upload assets to release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.create-release.outputs.version }}
+          files: release-assets/*
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

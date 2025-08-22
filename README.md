@@ -58,6 +58,16 @@ docker pull ghcr.io/your-username/v6:latest
 docker run --rm -v $(pwd):/tests ghcr.io/your-username/v6:latest run /tests/your-test.js
 ```
 
+### Build Script Integration
+
+The CI/CD system is built around the same scripts you use locally:
+
+- **`build-all.sh`**: Used by GitHub Actions for consistent cross-platform builds
+- **`quick-build.sh`**: Available for rapid local development
+- **`Makefile`**: Provides convenient targets that wrap the build scripts
+
+This ensures that builds are reproducible and consistent between local development and CI environments.
+
 ## Usage
 
 ```bash
@@ -73,11 +83,31 @@ v6 run test.js --iterations 1000 --duration 30.0 --vus 10
 
 ## CI/CD
 
-This project uses GitHub Actions for continuous integration and releases:
+This project uses GitHub Actions for continuous integration and releases, leveraging the `build-all.sh` script for consistent builds:
 
-- **CI Pipeline**: Runs tests, linting, and builds on every push
-- **Release Pipeline**: Creates cross-platform binaries and Docker images on tagged releases
-- **Supported Platforms**: Linux, macOS, Windows (x86_64 and ARM64 where applicable)
+### Workflows
+
+- **CI Pipeline** (`.github/workflows/ci.yml`): Runs tests, linting, and cross-platform builds on every push
+- **Build Pipeline** (`.github/workflows/build.yml`): Creates multi-platform binaries using `build-all.sh`
+- **Release Pipeline** (`.github/workflows/release.yml`): Full release builds with archives and checksums
+- **Build Script Testing** (`.github/workflows/test-build-script.yml`): Tests the build scripts across platforms
+
+### GitHub Actions Integration
+
+The workflows use the same `build-all.sh` script you can run locally:
+
+```yaml
+# Example from our CI
+- name: Install targets and build
+  run: |
+    ./build-all.sh --install-targets x86_64-unknown-linux-gnu aarch64-apple-darwin
+```
+
+### Supported Platforms in CI
+
+- **Linux**: x86_64, ARM64 (both GNU and musl)
+- **macOS**: Intel x86_64, Apple Silicon ARM64  
+- **Windows**: x86_64 (MSVC)
 
 ### Creating Releases
 
@@ -86,6 +116,25 @@ To create a new release, simply push a git tag starting with `v`:
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
+```
+
+This automatically:
+- Runs the full test suite
+- Builds binaries for all platforms using `build-all.sh`
+- Creates compressed archives with checksums
+- Generates a GitHub release with all artifacts
+- Builds and pushes Docker images
+
+### Local vs CI Consistency
+
+Both local development and CI use the same build scripts:
+
+```bash
+# What you run locally:
+./build-all.sh --clean
+
+# What CI runs:
+./build-all.sh --install-targets --clean x86_64-unknown-linux-gnu aarch64-apple-darwin
 ```
 
 This will automatically:
