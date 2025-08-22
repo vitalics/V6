@@ -131,3 +131,62 @@ pub fn display_test_config(
     println!("👥 Virtual Users: {}", vus);
     println!("{}", "─".repeat(50));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_iterations_override() {
+        assert_eq!(parse_iterations_override("10"), 10.0);
+        assert_eq!(parse_iterations_override("inf"), f64::INFINITY);
+        assert_eq!(parse_iterations_override("infinity"), f64::INFINITY);
+        assert_eq!(parse_iterations_override("invalid"), 1.0);
+    }
+
+    #[test]
+    fn test_test_config_serialization() {
+        let config = TestConfig {
+            iterations: "10".to_string(),
+            duration: 30.0,
+            timeout: 60.0,
+            vus: 5,
+        };
+        
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: TestConfig = serde_json::from_str(&json).unwrap();
+        
+        assert_eq!(config.iterations, deserialized.iterations);
+        assert_eq!(config.duration, deserialized.duration);
+        assert_eq!(config.timeout, deserialized.timeout);
+        assert_eq!(config.vus, deserialized.vus);
+    }
+
+    #[test]
+    fn test_cli_parsing() {
+        use clap::Parser;
+        
+        // Test init command
+        let args = vec!["v6", "init", "--file", "test.js"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        
+        match cli.command {
+            Commands::Init { file, .. } => {
+                assert_eq!(file, "test.js");
+            }
+            _ => panic!("Expected Init command"),
+        }
+        
+        // Test run command
+        let args = vec!["v6", "run", "test.js", "--iterations", "100"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        
+        match cli.command {
+            Commands::Run { file, iterations, .. } => {
+                assert_eq!(file, "test.js");
+                assert_eq!(iterations.unwrap(), "100");
+            }
+            _ => panic!("Expected Run command"),
+        }
+    }
+}
