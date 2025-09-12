@@ -430,10 +430,10 @@ pub async fn run_load_test(
         let mut task_counter = 0usize;
 
         // Create single shared runtime and pre-compiled script
-        let (shared_runtime, shared_script) = match create_shared_runtime(iterations, duration, iteration_timeout_secs, vus, &iteration_fn) {
+        let (shared_runtime, shared_script) = match create_shared_runtime(iterations, duration, iteration_timeout_secs, vus, iteration_fn) {
             Ok((runtime, script)) => (runtime, script),
             Err(e) => {
-                println!("Failed to create shared runtime: {}", e);
+                println!("Failed to create shared runtime: {e}");
                 return;
             }
         };
@@ -444,7 +444,7 @@ pub async fn run_load_test(
             // For infinite iterations, continuously spawn tasks across VUs
             loop {
                 if start_time.elapsed() >= execution_duration {
-                    println!("{} second timeout reached for infinite iterations", duration);
+                    println!("{duration} second timeout reached for infinite iterations");
                     break;
                 }
 
@@ -514,15 +514,15 @@ pub async fn run_load_test(
             }
             let rate = task_counter as f64 / execution_duration.as_secs_f64();
             println!(
-                "Completed {} tasks across {} VUs (infinite iterations with {}s timeout) - Rate: {:.2} iterations/sec",
-                task_counter, vus, duration, rate
+                "Completed {task_counter} tasks across {vus} VUs (infinite iterations with {duration}s timeout) - Rate: {:.2} iterations/sec",
+                rate
             );
         } else {
             let completed_tasks = handles.len();
             for task in handles {
                 let _ = task.await;
             }
-            println!("All {} tasks completed across {} VUs", completed_tasks, vus);
+            println!("All {completed_tasks} tasks completed across {vus} VUs");
         }
 
         // Final cleanup for shared runtime
@@ -540,10 +540,7 @@ pub async fn run_load_test(
     if is_infinite {
         match timeout(execution_duration, task_future).await {
             Ok(_) => println!("Tasks completed within timeout"),
-            Err(_) => println!(
-                "{} second timeout reached for infinite iterations",
-                duration
-            ),
+            Err(_) => println!("{duration} second timeout reached for infinite iterations"),
         }
     } else {
         task_future.await;
