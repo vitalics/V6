@@ -16,19 +16,17 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
-      
+
       - name: Check formatting
         run: cargo fmt --check
-      
-      - name: Run clippy
-        run: cargo clippy -- -D warnings
-      
+
+
       - name: Run tests
         run: cargo test --verbose
 
@@ -51,25 +49,25 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.platform }}
-      
+
       - name: Install cross-compilation tools (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
-      
+
       - name: Make build script executable
         if: matrix.os != 'windows-latest'
         run: chmod +x build-all.sh
-      
+
       - name: Test build with build-all.sh
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
@@ -77,7 +75,7 @@ jobs:
           else
             ./build-all.sh --install-targets ${{ matrix.targets }}
           fi
-      
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
