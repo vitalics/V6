@@ -3,10 +3,14 @@ use deno_core::{extension, op2};
 use deno_error::JsErrorBox;
 use std::{
     rc::Rc,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use tokio::time::timeout;
+
+// Type aliases to reduce complexity
+type SharedRuntime = Rc<Mutex<deno_core::JsRuntime>>;
+type CompiledScript = Rc<deno_core::v8::Global<deno_core::v8::Script>>;
 
 static RUNTIME_SNAPSHOT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/V6_SNAPSHOT.bin"));
 
@@ -86,7 +90,7 @@ async fn op_fetch(
                     "DELETE" => client.delete(&url),
                     "PATCH" => client.patch(&url),
                     "HEAD" => client.head(&url),
-                    _ => return Err(format!("Unsupported HTTP method: {}", method)),
+                    _ => return Err(format!("Unsupported HTTP method: {method}")),
                 };
             }
 
@@ -126,10 +130,10 @@ async fn op_fetch(
                         "headers": headers,
                         "body": text
                     })),
-                    Err(e) => Err(format!("Failed to read response body: {}", e)),
+                    Err(e) => Err(format!("Failed to read response body: {e}")),
                 }
             }
-            Err(e) => Err(format!("Request failed: {}", e)),
+            Err(e) => Err(format!("Request failed: {e}")),
         }
     });
 
@@ -138,13 +142,12 @@ async fn op_fetch(
         Ok(Ok(response)) => Ok(response),
         Ok(Err(error_msg)) => Err(JsErrorBox::type_error(error_msg)),
         Err(join_error) => Err(JsErrorBox::type_error(format!(
-            "Task join error: {}",
-            join_error
+            "Task join error: {join_error}"
         ))),
     }
 }
 
-pub fn extract_iterations(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f64> {
+pub fn extract_iterations(js_runtime: SharedRuntime) -> Result<f64> {
     let mut runtime = js_runtime.lock().unwrap();
     let mut scope = runtime.handle_scope();
 
@@ -163,7 +166,7 @@ pub fn extract_iterations(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Resul
     Ok(1.0) // Default to 1 iteration if not found
 }
 
-pub fn extract_duration(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f64> {
+pub fn extract_duration(js_runtime: SharedRuntime) -> Result<f64> {
     let mut runtime = js_runtime.lock().unwrap();
     let mut scope = runtime.handle_scope();
 
@@ -181,7 +184,7 @@ pub fn extract_duration(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<
     Ok(10.0) // Default to 10 seconds if not found
 }
 
-pub fn extract_timeout(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f64> {
+pub fn extract_timeout(js_runtime: SharedRuntime) -> Result<f64> {
     let mut runtime = js_runtime.lock().unwrap();
     let mut scope = runtime.handle_scope();
 
@@ -199,7 +202,7 @@ pub fn extract_timeout(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<f
     Ok(30.0) // Default to 30 seconds if not found
 }
 
-pub fn extract_vus(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<usize> {
+pub fn extract_vus(js_runtime: SharedRuntime) -> Result<usize> {
     let mut runtime = js_runtime.lock().unwrap();
     let mut scope = runtime.handle_scope();
 
@@ -217,8 +220,8 @@ pub fn extract_vus(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<usize
     Ok(1) // Default to 1 VU if not found
 }
 
-pub fn create_fresh_runtime() -> Result<Arc<Mutex<deno_core::JsRuntime>>> {
-    let js_runtime = Arc::new(Mutex::new(deno_core::JsRuntime::new(
+pub fn create_fresh_runtime() -> Result<SharedRuntime> {
+    let js_runtime = Rc::new(Mutex::new(deno_core::JsRuntime::new(
         deno_core::RuntimeOptions {
             module_loader: Some(Rc::new(TsModuleLoader)),
             startup_snapshot: Some(RUNTIME_SNAPSHOT),
@@ -229,7 +232,7 @@ pub fn create_fresh_runtime() -> Result<Arc<Mutex<deno_core::JsRuntime>>> {
     Ok(js_runtime)
 }
 
-pub fn extract_iteration_function(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) -> Result<String> {
+pub fn extract_iteration_function(js_runtime: SharedRuntime) -> Result<String> {
     let mut runtime = js_runtime.lock().unwrap();
     let mut scope = runtime.handle_scope();
 
@@ -249,7 +252,7 @@ pub fn extract_iteration_function(js_runtime: Arc<Mutex<deno_core::JsRuntime>>) 
 }
 
 pub fn setup_runtime_config(
-    js_runtime: Arc<Mutex<deno_core::JsRuntime>>,
+    js_runtime: SharedRuntime,
     iterations: f64,
     duration: f64,
     timeout: f64,
@@ -295,8 +298,8 @@ pub fn setup_runtime_config(
 pub async fn run_iteration(
     i: usize,
     vu_id: usize,
-    js_runtime: Arc<Mutex<deno_core::JsRuntime>>,
-    compiled_script: Arc<deno_core::v8::Global<deno_core::v8::Script>>,
+    js_runtime: SharedRuntime,
+    compiled_script: CompiledScript,
     iteration_timeout: Duration,
 ) {
     let iteration_future = async {
@@ -334,7 +337,7 @@ pub async fn run_iteration(
             match poll_result {
                 std::task::Poll::Ready(Ok(())) => break, // Completed
                 std::task::Poll::Ready(Err(e)) => {
-                    println!("Task {} (VU {}) failed: {:?}", i, vu_id, e);
+                    println!("Task {i} (VU {vu_id}) failed: {e:?}");
                     break; // Break on error
                 }
                 std::task::Poll::Pending => {
@@ -349,8 +352,7 @@ pub async fn run_iteration(
     match timeout(iteration_timeout, iteration_future).await {
         Ok(_) => {}
         Err(_) => println!(
-            "Task {} (VU {}) timed out after {:?}",
-            i, vu_id, iteration_timeout
+            "Task {i} (VU {vu_id}) timed out after {iteration_timeout:?}"
         ),
     }
 }
@@ -361,10 +363,7 @@ pub fn create_shared_runtime(
     timeout: f64,
     vus: usize,
     iteration_fn: &str,
-) -> Result<(
-    Arc<Mutex<deno_core::JsRuntime>>,
-    Arc<deno_core::v8::Global<deno_core::v8::Script>>,
-)> {
+) -> Result<(SharedRuntime, CompiledScript)> {
     let runtime = create_fresh_runtime()?;
     setup_runtime_config(
         runtime.clone(),
@@ -382,7 +381,7 @@ pub fn create_shared_runtime(
         let script_source = "globalThis.currentConfig.iteration();";
         let v8_string = deno_core::v8::String::new(&mut scope, script_source).unwrap();
         let script = deno_core::v8::Script::compile(&mut scope, v8_string, None).unwrap();
-        Arc::new(deno_core::v8::Global::new(&mut scope, script))
+        Rc::new(deno_core::v8::Global::new(&mut scope, script))
     };
 
     Ok((runtime, compiled_script))
@@ -514,8 +513,7 @@ pub async fn run_load_test(
             }
             let rate = task_counter as f64 / execution_duration.as_secs_f64();
             println!(
-                "Completed {task_counter} tasks across {vus} VUs (infinite iterations with {duration}s timeout) - Rate: {:.2} iterations/sec",
-                rate
+                "Completed {task_counter} tasks across {vus} VUs (infinite iterations with {duration}s timeout) - Rate: {rate:.2} iterations/sec"
             );
         } else {
             let completed_tasks = handles.len();

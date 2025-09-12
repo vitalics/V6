@@ -103,7 +103,7 @@ defineConfig({{
     );
 
     std::fs::write(file, template)?;
-    println!("✅ Created test file: {}", file);
+    println!("✅ Created test file: {file}");
     println!("📝 Edit the file to add your test logic inside the iteration function");
     Ok(())
 }
@@ -117,7 +117,7 @@ pub fn parse_iterations_override(iterations_str: &str) -> f64 {
 
 pub fn validate_file_exists(file: &str) -> Result<()> {
     if !Path::new(file).exists() {
-        eprintln!("❌ File not found: {}", file);
+        eprintln!("❌ File not found: {file}");
         std::process::exit(1);
     }
     Ok(())
@@ -125,15 +125,15 @@ pub fn validate_file_exists(file: &str) -> Result<()> {
 
 pub fn display_test_config(file: &str, iterations: f64, duration: f64, timeout: f64, vus: usize) {
     println!("🚀 Starting load test");
-    println!("📁 File: {}", file);
+    println!("📁 File: {file}");
     if iterations.is_infinite() {
         println!("🔄 Iterations: ∞ (infinite)");
     } else {
         println!("🔄 Iterations: {}", iterations as u64);
     }
-    println!("⏱️  Duration: {}s", duration);
-    println!("⏰ Timeout per iteration: {}s", timeout);
-    println!("👥 Virtual Users: {}", vus);
+    println!("⏱️  Duration: {duration}s");
+    println!("⏰ Timeout per iteration: {timeout}s");
+    println!("👥 Virtual Users: {vus}");
     println!("{}", "─".repeat(50));
 }
 
