@@ -3,6 +3,8 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    // Add this line to specify linking with V8
+    println!("cargo:rustc-link-lib=v8");
     extension!(
         // extension name
         v6,
@@ -30,4 +32,9 @@ fn main() {
     .unwrap();
 
     std::fs::write(snapshot_path, snapshot.output).unwrap();
+
+    // Add these lines to ensure proper linking
+    println!("cargo:rustc-link-search={}", env::var("OUT_DIR").unwrap());
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/runtime.js");
 }

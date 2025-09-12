@@ -76,19 +76,19 @@ build-clean:
 # Platform-specific builds
 linux:
 	@echo "Building Linux targets..."
-	./build-all.sh $(LINUX_TARGETS)
+	V8_FROM_SOURCE=1 ./build-all.sh $(LINUX_TARGETS)
 
 macos:
 	@echo "Building macOS targets..."
-	./build-all.sh $(MACOS_TARGETS)
+	V8_FROM_SOURCE=1 ./build-all.sh $(MACOS_TARGETS)
 
 windows:
 	@echo "Building Windows targets..."
-	./build-all.sh $(WINDOWS_TARGETS)
+	V8_FROM_SOURCE=1 ./build-all.sh $(WINDOWS_TARGETS)
 
 musl:
 	@echo "Building musl targets..."
-	./build-all.sh $(MUSL_TARGETS)
+	V8_FROM_SOURCE=1 ./build-all.sh $(MUSL_TARGETS)
 
 # Native build
 native:
@@ -259,7 +259,7 @@ release-build: release-prep build-all archives checksums
 	@echo "Release build complete!"
 
 # Quick targets for common operations
-quick-linux: 
+quick-linux:
 	cargo build --release --target x86_64-unknown-linux-gnu
 
 quick-macos:
