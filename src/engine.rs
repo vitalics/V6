@@ -351,9 +351,7 @@ pub async fn run_iteration(
 
     match timeout(iteration_timeout, iteration_future).await {
         Ok(_) => {}
-        Err(_) => println!(
-            "Task {i} (VU {vu_id}) timed out after {iteration_timeout:?}"
-        ),
+        Err(_) => println!("Task {i} (VU {vu_id}) timed out after {iteration_timeout:?}"),
     }
 }
 
