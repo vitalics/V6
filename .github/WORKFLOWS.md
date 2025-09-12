@@ -9,7 +9,6 @@ The V6 project uses a **unified build system** where the same scripts used for l
 ### Key Components
 
 - **`build-all.sh`**: Main multi-target build script
-- **`quick-build.sh`**: Simplified build script for development
 - **`Makefile`**: Convenient wrapper targets
 - **GitHub Actions**: Automated CI/CD using the build scripts
 
@@ -33,7 +32,7 @@ matrix:
   include:
     - os: ubuntu-latest
       targets: "x86_64-unknown-linux-gnu"
-    - os: macos-latest  
+    - os: macos-latest
       targets: "aarch64-apple-darwin"
     - os: windows-latest
       targets: "x86_64-pc-windows-msvc"
@@ -193,7 +192,7 @@ All workflows use the same `build-all.sh` script with different parameters:
 - **Purpose**: Development verification
 - **Contents**: Basic binaries
 
-### Build Artifacts  
+### Build Artifacts
 - **Retention**: 7 days
 - **Purpose**: Feature testing
 - **Contents**: Multi-platform binaries
@@ -201,7 +200,7 @@ All workflows use the same `build-all.sh` script with different parameters:
 ### Release Artifacts
 - **Retention**: Permanent (GitHub releases)
 - **Purpose**: Distribution
-- **Contents**: 
+- **Contents**:
   - Optimized binaries
   - Compressed archives (`.tar.gz`, `.zip`)
   - SHA256 checksums
@@ -216,7 +215,7 @@ platforms: linux/amd64,linux/arm64
 
 ### Registry
 - **Location**: GitHub Container Registry (`ghcr.io`)
-- **Images**: 
+- **Images**:
   - `ghcr.io/owner/v6:latest`
   - `ghcr.io/owner/v6:v1.0.0`
   - `ghcr.io/owner/v6:sha-abc123`

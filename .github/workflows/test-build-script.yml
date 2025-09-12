@@ -2,9 +2,9 @@ name: Test Build Script
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
   workflow_dispatch:
 
 env:
@@ -36,32 +36,32 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
         with:
           key: test-build-${{ matrix.platform }}
-      
+
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
-      
+
       - name: Install cross-compilation tool
         run: cargo install cross --git https://github.com/cross-rs/cross
-      
+
       - name: Test build script help
         run: |
           chmod +x build-all.sh
           ./build-all.sh --help
-      
+
       - name: Test build script list-targets
         run: ./build-all.sh --list-targets
-      
+
       - name: Test single target build
         run: |
           # Build just one target to test the script works
@@ -72,18 +72,18 @@ jobs:
           elif [[ "${{ matrix.platform }}" == "windows" ]]; then
             ./build-all.sh --install-targets x86_64-pc-windows-msvc
           fi
-      
+
       - name: Verify build output
         run: |
           echo "Build directory contents:"
           ls -la target/release-builds/ || echo "No build directory found"
-          
+
           echo "Target directory contents:"
           find target -name "v6*" -type f || echo "No binaries found"
-      
+
       - name: Test build script status
         run: ./build-all.sh --help
-      
+
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,7 +104,7 @@ jobs:
         with:
           name: test-build-linux
           path: artifacts
-      
+
       - name: Test binary execution
         run: |
           find artifacts -name "v6-*linux*" -type f | head -1 | xargs -I {} bash -c '
@@ -120,17 +120,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Check script syntax
         run: |
           bash -n build-all.sh
           echo "✅ build-all.sh syntax is valid"
-      
-      - name: Check quick-build script syntax
-        run: |
-          bash -n quick-build.sh
-          echo "✅ quick-build.sh syntax is valid"
-      
+
       - name: Verify script permissions
         run: |
           if [[ -x build-all.sh ]]; then
@@ -139,23 +134,16 @@ jobs:
             echo "❌ build-all.sh is not executable"
             exit 1
           fi
-          
-          if [[ -x quick-build.sh ]]; then
-            echo "✅ quick-build.sh is executable"
-          else
-            echo "❌ quick-build.sh is not executable"
-            exit 1
-          fi
-      
+
       - name: Test script compatibility
         run: |
           echo "Testing build-all.sh with various bash versions..."
-          
+
           # Test with current bash
           bash --version
           bash build-all.sh --help >/dev/null
           echo "✅ Works with system bash"
-          
+
           # Test script without execution bit
           bash ./build-all.sh --help >/dev/null
           echo "✅ Works when called with bash explicitly"
@@ -166,22 +154,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Test Makefile help
         run: make help
-      
+
       - name: Test Makefile status
         run: make status
-      
+
       - name: Test make install-targets
         run: make install-targets
-      
+
       - name: Test make quick-linux
         run: make quick-linux
-      
+
       - name: Verify Makefile build
         run: |
           echo "Checking if binary was created..."
