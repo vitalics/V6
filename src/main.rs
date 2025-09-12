@@ -1,15 +1,20 @@
 use anyhow::Result;
 use clap::Parser;
 
-
 mod cli;
 mod engine;
 
-use cli::{Cli, Commands, init_command, parse_iterations_override, validate_file_exists, display_test_config};
-use engine::{create_fresh_runtime, extract_iterations, extract_duration, extract_timeout, extract_vus, extract_iteration_function, run_load_test};
+use cli::{
+    display_test_config, init_command, parse_iterations_override, validate_file_exists, Cli,
+    Commands,
+};
+use engine::{
+    create_fresh_runtime, extract_duration, extract_iteration_function, extract_iterations,
+    extract_timeout, extract_vus, run_load_test,
+};
 
 async fn run_command(
-    file: &str, 
+    file: &str,
     iterations_override: Option<String>,
     duration_override: Option<f64>,
     timeout_override: Option<f64>,
@@ -48,7 +53,14 @@ async fn run_command(
     display_test_config(file, iterations, duration, iteration_timeout_secs, vus);
 
     // Run the load test
-    run_load_test(iterations, duration, iteration_timeout_secs, vus, &iteration_fn).await?;
+    run_load_test(
+        iterations,
+        duration,
+        iteration_timeout_secs,
+        vus,
+        &iteration_fn,
+    )
+    .await?;
 
     // Clean up config runtime
     drop(config_runtime);
@@ -61,17 +73,19 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Init { file, iterations, duration, timeout, vus } => {
-            init_command(file, iterations, *duration, *timeout, *vus)
-        },
-        Commands::Run { file, iterations, duration, timeout, vus } => {
-            run_command(
-                file, 
-                iterations.clone(), 
-                *duration, 
-                *timeout, 
-                *vus
-            ).await
-        },
+        Commands::Init {
+            file,
+            iterations,
+            duration,
+            timeout,
+            vus,
+        } => init_command(file, iterations, *duration, *timeout, *vus),
+        Commands::Run {
+            file,
+            iterations,
+            duration,
+            timeout,
+            vus,
+        } => run_command(file, iterations.clone(), *duration, *timeout, *vus).await,
     }
 }

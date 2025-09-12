@@ -52,9 +52,9 @@ fn create_optimized_client() -> reqwest::Client {
         .pool_max_idle_per_host(100)
         .pool_idle_timeout(std::time::Duration::from_secs(30))
         .tcp_keepalive(std::time::Duration::from_secs(60))
-        .timeout(std::time::Duration::from_secs(10))  // Reasonable timeout for localhost
+        .timeout(std::time::Duration::from_secs(10)) // Reasonable timeout for localhost
         .user_agent("V6-LoadTest/1.0")
-        .connect_timeout(std::time::Duration::from_secs(5))  // Reasonable connect timeout
+        .connect_timeout(std::time::Duration::from_secs(5)) // Reasonable connect timeout
         .tcp_nodelay(true)
         .http2_keep_alive_interval(Some(std::time::Duration::from_secs(30)))
         .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
@@ -137,7 +137,10 @@ async fn op_fetch(
     match fetch_task.await {
         Ok(Ok(response)) => Ok(response),
         Ok(Err(error_msg)) => Err(JsErrorBox::type_error(error_msg)),
-        Err(join_error) => Err(JsErrorBox::type_error(format!("Task join error: {}", join_error))),
+        Err(join_error) => Err(JsErrorBox::type_error(format!(
+            "Task join error: {}",
+            join_error
+        ))),
     }
 }
 
