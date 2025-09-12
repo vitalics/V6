@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [main, master, develop]
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,12 +20,15 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install v8
+        run: |
+          sudo apt-get install libv8-dev
+
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt --check
-
 
       - name: Run tests
         run: cargo test --verbose
@@ -63,6 +66,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
+
+      - name: Install v8 (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get install libv8-dev
+
+      - name: Install v8 (MacOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install v8
+
+      - name: Install v8 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          vcpkg install v8:x64-windows
 
       - name: Make build script executable
         if: matrix.os != 'windows-latest'
