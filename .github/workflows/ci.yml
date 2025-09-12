@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install v8
+        run: |
+          sudo apt-get install libv8-dev
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test --verbose
+
+  build:
+    name: Build
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: "x86_64-unknown-linux-gnu"
+            platform: linux
+          - os: macos-latest
+            targets: "aarch64-apple-darwin"
+            platform: macos
+          - os: windows-latest
+            targets: "x86_64-pc-windows-msvc"
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+
+      - name: Install cross-compilation tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install v8 (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get install libv8-dev
+
+      - name: Install v8 (MacOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install v8
+
+      - name: Install v8 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          vcpkg install v8:x64-windows
+
+      - name: Make build script executable
+        if: matrix.os != 'windows-latest'
+        run: chmod +x build-all.sh
+
+      - name: Test build with build-all.sh
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            bash build-all.sh --install-targets ${{ matrix.targets }}
+          else
+            ./build-all.sh --install-targets ${{ matrix.targets }}
+          fi
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: v6-binary-${{ matrix.platform }}
+          path: target/release-builds/
+          retention-days: 7

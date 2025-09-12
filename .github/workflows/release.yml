@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Release
+        id: release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-release:
+    name: Build Release
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: "x86_64-unknown-linux-gnu x86_64-unknown-linux-musl aarch64-unknown-linux-gnu"
+            platform: linux
+          - os: macos-latest
+            targets: "x86_64-apple-darwin aarch64-apple-darwin"
+            platform: macos
+          - os: windows-latest
+            targets: "x86_64-pc-windows-msvc"
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+      
+      - name: Install cross-compilation tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+          cargo install cross --git https://github.com/cross-rs/cross
+      
+      - name: Install cross-compilation tools (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          # Install newer bash if needed for build script
+          if [[ ${BASH_VERSION%%.*} -lt 4 ]]; then
+            brew install bash
+          fi
+      
+      - name: Install cross-compilation tools (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+      
+      - name: Make build script executable
+        if: matrix.os != 'windows-latest'
+        run: chmod +x build-all.sh
+      
+      - name: Install targets and build with archives
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            bash build-all.sh --install-targets --clean ${{ matrix.targets }}
+          else
+            ./build-all.sh --install-targets --clean ${{ matrix.targets }}
+          fi
+      
+      - name: Upload artifacts for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ matrix.platform }}
+          path: target/release-builds/
+          retention-days: 1
+
+  finalize-release:
+    name: Finalize Release
+    needs: [create-release, build-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Organize and upload release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "v6-*" -type f | while read file; do
+            cp "$file" release-assets/
+          done
+          
+          # List what we have
+          echo "Release assets:"
+          ls -la release-assets/
+      
+      - name: Upload assets to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.create-release.outputs.version }}
+          files: release-assets/*
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
